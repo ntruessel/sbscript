@@ -15,5 +15,5 @@ A little shell script I use to create my secureboot signed efi binaries
 - https://github.com/haraldh/mkrescue-uefi
 - http://kroah.com/log/blog/2013/09/02/booting-a-self-signed-linux-kernel/
 
-## license
+## License
 This is free and unencumbered software released into the public domain. See [UNLICENSE](./UNLICENSE) for details.
