@@ -1,0 +1,84 @@
+#!/usr/bin/env sh
+#
+# This script creates a single efi executable containing the given kernel,
+# initrd, and commandline. This executable will then be signed using the
+# given key and certificate. The signed efi executable will be copied to
+# the desired location.
+
+# efistub and desired destination
+EFISTUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
+DESTINATION=/boot/linux-secureboot
+
+# The parts of the efi executable
+KERNEL=/boot/vmlinuz-linux
+INITRD=/boot/initramfs-linux.img
+CMDLINE=/proc/cmdline
+OSREL=/etc/os-release
+
+# Secureboot key and certificate
+SBKEY=
+SBCERT=
+
+# Print message and exit
+function die() {
+    echo "$@" 1>&2
+    exit 1
+}
+
+# Test whether variables are valid
+echo "Checking configuration"
+[[ -f "$EFISTUB" ]] || die "The given efistub does not exist."
+[[ -f "$KERNEL" ]] || die "The given kernel does not exist."
+[[ -f "$INITRD" ]] || die "The given initrd does not exist."
+[[ -f "$CMDLINE" ]] || die "The given commanline does not exist."
+[[ -f "$OSREL" ]] || die "The given os-release does not exist."
+[[ -f "$SBKEY" ]] || die "The given secureboot key does not exist."
+[[ -f "$SBCERT" ]] || die "The given secureboot certificate does not exist."
+
+# setup trap to delete temporary files on exit
+trap '[[ -n "$TMPDIR" ]] && rm -rf "$TMPDIR"' EXIT
+
+# Create temporary directory
+echo -en "\nCreating temporary directory "
+TMPDIR=$(mktemp -d --tmpdir sbscript.XXXXXXXXXX)
+echo "$TMPDIR (will be removed on exit)"
+
+# create unsigned efi executable
+echo -e "\nAssembling unsigend efi executable from"
+echo -e "\t- kernel:      $KERNEL"
+echo -e "\t- initrd:      $INITRD"
+echo -e "\t- commandline: $CMDLINE"
+echo -e "\t- os-release:  $OSREL"
+echo -e "\t- efi stub:    $EFISTUB"
+objcopy --add-section .osrel="$OSREL" --change-section-vma .osrel=0x20000 \
+        --add-section .cmdline="$CMDLINE" --change-section-vma .cmdline=0x30000 \
+        --add-section .linux="$KERNEL" --change-section-vma .linux=0x40000 \
+        --add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
+        "$EFISTUB" "$TMPDIR/unsigned.efi"
+
+[[ $? = 0 ]] || die "Failed to assemble the unsigned efi executable"
+
+# sign for secureboot and copy to the right location
+echo -e "\nSigning efi executable using"
+echo -e "\t- key:         $SBKEY"
+echo -e "\t- certificate: $SBCERT"
+sbsign --key "$SBKEY" --cert "$SBCERT" --output "$TMPDIR/signed.efi" \
+        "$TMPDIR/unsigned.efi" 2>/dev/null
+
+[[ $? = 0 ]] || die "Failed to sign the efi executable"
+
+# Verify signature
+echo -en "\nVerifying signature: "
+sbverify --cert "$SBCERT" "$TMPDIR/signed.efi" &> /dev/null
+if [[ $? = 0 ]]; then
+    echo "OK"
+else
+    echo "Failed"
+    die "Verification of signed efi executable failed."
+fi
+
+# copy to destination
+echo -e "\nCopying binary to $DESTINATION"
+sudo cp "$TMPDIR/signed.efi" "$DESTINATION"
+
+[[ $? = 0 ]] || die "Failed to copy the binary to $DESTINATION"
