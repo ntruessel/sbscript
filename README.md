@@ -13,7 +13,7 @@ A little shell script I use to create my secureboot signed efi binaries
 Sometimes `sbverify` claims the kernel image is not properly signed (signature
 verification fails). Instead of aborting with an error message, the script emits
 a warning and continues to do its job, since on all my computers, the generated
-images pass the EFI verifiaction step.
+images pass the EFI verification step.
 
 ## Useful resources
 - https://secure.freedesktop.org/~kay/efistub.txt
