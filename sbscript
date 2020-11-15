@@ -11,9 +11,11 @@ DESTINATION=/boot/linux-secureboot
 
 # The parts of the efi executable
 KERNEL=/boot/vmlinuz-linux
+UCODE=
 INITRD=/boot/initramfs-linux.img
 CMDLINE=/proc/cmdline
 OSREL=/etc/os-release
+SPLASH=
 
 # Secureboot key and certificate
 SBKEY=
@@ -34,9 +36,11 @@ function warn() {
 echo "Checking configuration"
 [[ -f "$EFISTUB" ]] || die "The given efistub does not exist."
 [[ -f "$KERNEL" ]] || die "The given kernel does not exist."
+[[ -z "$UCODE" || -f "$UCODE" ]] || die "The given microcode image does not exist."
 [[ -f "$INITRD" ]] || die "The given initrd does not exist."
 [[ -f "$CMDLINE" ]] || die "The given commanline does not exist."
 [[ -f "$OSREL" ]] || die "The given os-release does not exist."
+[[ -z "$SPLASH" || -f "$SPLASH" ]] || die "The given splash image does not exist."
 [[ -f "$SBKEY" ]] || die "The given secureboot key does not exist."
 [[ -f "$SBCERT" ]] || die "The given secureboot certificate does not exist."
 
@@ -48,20 +52,49 @@ echo -en "\nCreating temporary directory "
 TMPDIR=$(mktemp -d --tmpdir sbscript.XXXXXXXXXX)
 echo "$TMPDIR (will be removed on exit)"
 
-# create unsigned efi executable
-echo -e "\nAssembling unsigend efi executable from"
-echo -e "\t- kernel:      $KERNEL"
-echo -e "\t- initrd:      $INITRD"
-echo -e "\t- commandline: $CMDLINE"
-echo -e "\t- os-release:  $OSREL"
-echo -e "\t- efi stub:    $EFISTUB"
-objcopy --add-section .osrel="$OSREL" --change-section-vma .osrel=0x20000 \
-        --add-section .cmdline="$CMDLINE" --change-section-vma .cmdline=0x30000 \
-        --add-section .linux="$KERNEL" --change-section-vma .linux=0x40000 \
-        --add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
-        "$EFISTUB" "$TMPDIR/unsigned.efi"
+# create unified initrd
+if [[ -n "$UCODE" ]]; then
+	echo -e "\nCreating a unified initrd from "
+	echo -e "\t- microcode:   $UCODE"
+	echo -e "\t- initrd:      $INITRD"
+	cat "$UCODE" "$INITRD" > "$TMPDIR/initrd"
+	UNIFIED_INITRD="$TMPDIR/initrd"
+else
+	UNIFIED_INITRD="$INITRD"
+fi
 
-[[ $? = 0 ]] || die "Failed to assemble the unsigned efi executable"
+# create unsigned efi executable
+if [[ -n "$SPLASH" ]]; then
+	echo -e "\nAssembling unsigend efi executable from"
+	echo -e "\t- kernel:      $KERNEL"
+	echo -e "\t- initrd:      $UNIFIED_INITRD"
+	echo -e "\t- commandline: $CMDLINE"
+	echo -e "\t- splash:      $SPLASH"
+	echo -e "\t- os-release:  $OSREL"
+	echo -e "\t- efi stub:    $EFISTUB"
+	objcopy --add-section .osrel="$OSREL" --change-section-vma .osrel=0x20000 \
+		--add-section .cmdline="$CMDLINE" --change-section-vma .cmdline=0x30000 \
+		--add-section .splash="$SPLASH" --change-section-vma .splash=0x40000 \
+		--add-section .linux="$KERNEL" --change-section-vma .linux=0x2000000 \
+		--add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
+		"$EFISTUB" "$TMPDIR/unsigned.efi"
+
+	[[ $? = 0 ]] || die "Failed to assemble the unsigned efi executable"
+else
+	echo -e "\nAssembling unsigend efi executable from"
+	echo -e "\t- kernel:      $KERNEL"
+	echo -e "\t- initrd:      $UNIFIED_INITRD"
+	echo -e "\t- commandline: $CMDLINE"
+	echo -e "\t- os-release:  $OSREL"
+	echo -e "\t- efi stub:    $EFISTUB"
+	objcopy --add-section .osrel="$OSREL" --change-section-vma .osrel=0x20000 \
+		--add-section .cmdline="$CMDLINE" --change-section-vma .cmdline=0x30000 \
+		--add-section .linux="$KERNEL" --change-section-vma .linux=0x2000000 \
+		--add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
+		"$EFISTUB" "$TMPDIR/unsigned.efi"
+
+	[[ $? = 0 ]] || die "Failed to assemble the unsigned efi executable"
+fi
 
 # sign for secureboot and copy to the right location
 echo -e "\nSigning efi executable using"
